@@ -128,7 +128,7 @@ export default function CircleDetailPage() {
                       <UserIcon size={10} />
                     </div>
                     <span className="font-mono">
-                      {member.username || `${member.wallet_address.slice(0, 6)}...${member.wallet_address.slice(-4)}`}
+                      {member.username || member.wallet_address}
                     </span>
                   </div>
                 ))}
@@ -198,7 +198,7 @@ export default function CircleDetailPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm">
                       <span className="font-mono text-dark-300">
-                        {item.username || `${item.wallet_address.slice(0, 6)}...${item.wallet_address.slice(-4)}`}
+                        {item.username || item.wallet_address}
                       </span>
                       {" "}
                       <span className="text-dark-400">

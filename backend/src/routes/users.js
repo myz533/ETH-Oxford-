@@ -13,13 +13,14 @@ router.post(
   moderationMiddleware("username", "bio"),
   (req, res) => {
     try {
-      const { walletAddress, username, avatarUrl, bio } = req.body;
+      const { walletAddress, username, avatarUrl, avatarData, bio } = req.body;
 
       if (!walletAddress) {
         return res.status(400).json({ error: "Wallet address required" });
       }
 
       const db = getDb();
+      const avatar = avatarData || avatarUrl || null;
 
       // Upsert user
       const existing = db
@@ -31,7 +32,7 @@ router.post(
           UPDATE users SET username = ?, avatar_url = ?, bio = ? WHERE wallet_address = ?
         `).run(
           username || existing.username,
-          avatarUrl || existing.avatar_url,
+          avatar || existing.avatar_url,
           bio || existing.bio,
           walletAddress.toLowerCase()
         );
@@ -39,7 +40,7 @@ router.post(
         db.prepare(`
           INSERT INTO users (wallet_address, username, avatar_url, bio)
           VALUES (?, ?, ?, ?)
-        `).run(walletAddress.toLowerCase(), username || null, avatarUrl || null, bio || null);
+        `).run(walletAddress.toLowerCase(), username || null, avatar, bio || null);
       }
 
       const user = db
@@ -55,6 +56,101 @@ router.post(
     }
   }
 );
+
+// ─────────────── UPDATE PROFILE ───────────────
+
+router.put(
+  "/:wallet/profile",
+  moderationMiddleware("username", "bio"),
+  (req, res) => {
+    try {
+      const db = getDb();
+      const wallet = req.params.wallet.toLowerCase();
+      const { username, avatarData, bio } = req.body;
+
+      const existing = db
+        .prepare("SELECT * FROM users WHERE wallet_address = ?")
+        .get(wallet);
+
+      if (!existing) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      db.prepare(`
+        UPDATE users SET
+          username = COALESCE(?, username),
+          avatar_url = COALESCE(?, avatar_url),
+          bio = COALESCE(?, bio)
+        WHERE wallet_address = ?
+      `).run(
+        username || null,
+        avatarData || null,
+        bio || null,
+        wallet
+      );
+
+      const user = db
+        .prepare("SELECT * FROM users WHERE wallet_address = ?")
+        .get(wallet);
+
+      res.json(user);
+    } catch (error) {
+      if (error.message?.includes("UNIQUE constraint failed: users.username")) {
+        return res.status(400).json({ error: "Username already taken" });
+      }
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// ─────────────── LEADERBOARD ───────────────
+// NOTE: This must be defined BEFORE /:wallet to avoid route conflict
+
+router.get("/leaderboard/top", (req, res) => {
+  try {
+    const db = getDb();
+
+    const leaderboard = db.prepare(`
+      SELECT 
+        u.wallet_address,
+        u.username,
+        u.avatar_url,
+        u.balance,
+        COUNT(CASE WHEN g.status = 'achieved' THEN 1 END) as goals_achieved,
+        COUNT(g.id) as total_goals,
+        COALESCE(SUM(p.total_staked), 0) as total_staked
+      FROM users u
+      LEFT JOIN goals g ON g.creator_wallet = u.wallet_address
+      LEFT JOIN (
+        SELECT wallet_address, SUM(amount) as total_staked FROM positions GROUP BY wallet_address
+      ) p ON p.wallet_address = u.wallet_address
+      GROUP BY u.wallet_address
+      ORDER BY u.balance DESC, goals_achieved DESC
+      LIMIT 20
+    `).all();
+
+    res.json(leaderboard);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─────────────── BALANCE HISTORY ───────────────
+
+router.get("/:wallet/balance-history", (req, res) => {
+  try {
+    const db = getDb();
+    const wallet = req.params.wallet.toLowerCase();
+
+    const history = db
+      .prepare("SELECT * FROM balance_history WHERE wallet_address = ? ORDER BY created_at DESC LIMIT 50")
+      .all(wallet);
+
+    res.json(history);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // ─────────────── GET USER PROFILE ───────────────
 
@@ -113,54 +209,6 @@ router.get("/:wallet", (req, res) => {
         balance: user.balance,
       },
     });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ─────────────── LEADERBOARD ───────────────
-
-router.get("/leaderboard/top", (req, res) => {
-  try {
-    const db = getDb();
-
-    const leaderboard = db.prepare(`
-      SELECT 
-        u.wallet_address,
-        u.username,
-        u.avatar_url,
-        u.balance,
-        COUNT(CASE WHEN g.status = 'achieved' THEN 1 END) as goals_achieved,
-        COUNT(g.id) as total_goals,
-        COALESCE(SUM(p.total_staked), 0) as total_staked
-      FROM users u
-      LEFT JOIN goals g ON g.creator_wallet = u.wallet_address
-      LEFT JOIN (
-        SELECT wallet_address, SUM(amount) as total_staked FROM positions GROUP BY wallet_address
-      ) p ON p.wallet_address = u.wallet_address
-      GROUP BY u.wallet_address
-      ORDER BY u.balance DESC, goals_achieved DESC
-      LIMIT 20
-    `).all();
-
-    res.json(leaderboard);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ─────────────── BALANCE HISTORY ───────────────
-
-router.get("/:wallet/balance-history", (req, res) => {
-  try {
-    const db = getDb();
-    const wallet = req.params.wallet.toLowerCase();
-
-    const history = db
-      .prepare("SELECT * FROM balance_history WHERE wallet_address = ? ORDER BY created_at DESC LIMIT 50")
-      .all(wallet);
-
-    res.json(history);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

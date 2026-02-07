@@ -61,13 +61,17 @@ export default function LeaderboardPage() {
                   )}
                 </div>
 
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center flex-shrink-0">
-                  <User size={18} />
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                  {user.avatar_url ? (
+                    <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <User size={18} />
+                  )}
                 </div>
 
                 <div className="flex-1 min-w-0">
                   <p className="font-bold truncate">
-                    {user.username || `${user.wallet_address.slice(0, 8)}...${user.wallet_address.slice(-6)}`}
+                    {user.username || user.wallet_address}
                   </p>
                   <p className="text-xs text-dark-400">
                     {user.total_goals} goals • {user.goals_achieved} achieved

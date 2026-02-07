@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { userApi, circleApi } from "../api";
+import ConnectModal from "../components/ConnectModal";
 
 const WalletContext = createContext(null);
 
@@ -9,13 +10,15 @@ export function WalletProvider({ children }) {
   const [circles, setCircles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showConnectModal, setShowConnectModal] = useState(false);
 
   // Check if wallet already connected
   useEffect(() => {
     const saved = localStorage.getItem("goalstake_wallet");
     if (saved) {
-      setWallet(saved);
-      loadUser(saved);
+      const addr = saved.toLowerCase();
+      setWallet(addr);
+      loadUser(addr);
     } else {
       setLoading(false);
     }
@@ -28,46 +31,54 @@ export function WalletProvider({ children }) {
       const userCircles = await circleApi.getUserCircles(address);
       setCircles(userCircles);
     } catch {
-      // New user, register
+      // User not in DB (e.g. DB was reset) — re-register them
       try {
-        const profile = await userApi.register(address);
-        setUser(profile);
-      } catch (err) {
-        console.error("Failed to load/register user:", err);
+        const savedName = localStorage.getItem("goalstake_username");
+        if (savedName) {
+          const profile = await userApi.register(address, savedName);
+          setUser(profile);
+        } else {
+          // No saved name — clear state so they see sign-in
+          setWallet(null);
+          localStorage.removeItem("goalstake_wallet");
+          localStorage.removeItem("goalstake_username");
+        }
+      } catch (regErr) {
+        console.error("Auto re-register failed:", regErr);
+        setWallet(null);
+        localStorage.removeItem("goalstake_wallet");
+        localStorage.removeItem("goalstake_username");
       }
     } finally {
       setLoading(false);
     }
   };
 
-  const connectWallet = useCallback(async () => {
+  // Opens the connect modal instead of auto-generating a wallet
+  const connectWallet = useCallback(() => {
+    setShowConnectModal(true);
+  }, []);
+
+  // Called from the ConnectModal with user-supplied data
+  const handleConnect = useCallback(async (address, username, avatarData) => {
     try {
       setError(null);
+      const addr = address.toLowerCase();
 
-      if (!window.ethereum) {
-        // Demo mode: use a random wallet
-        const demoWallet = "0x" + Array.from({ length: 40 }, () => 
-          Math.floor(Math.random() * 16).toString(16)
-        ).join("");
-        
-        setWallet(demoWallet);
-        localStorage.setItem("goalstake_wallet", demoWallet);
-        
-        // Register demo user
-        const profile = await userApi.register(demoWallet, `User_${demoWallet.slice(2, 8)}`);
-        setUser(profile);
-        return demoWallet;
-      }
+      const profile = await userApi.register(addr, username, null, avatarData);
+      setWallet(addr);
+      setUser(profile);
+      localStorage.setItem("goalstake_wallet", addr);
+      localStorage.setItem("goalstake_username", username);
 
-      const accounts = await window.ethereum.request({
-        method: "eth_requestAccounts",
-      });
+      // Load circles
+      try {
+        const userCircles = await circleApi.getUserCircles(addr);
+        setCircles(userCircles);
+      } catch {}
 
-      const address = accounts[0];
-      setWallet(address);
-      localStorage.setItem("goalstake_wallet", address);
-      await loadUser(address);
-      return address;
+      setShowConnectModal(false);
+      return addr;
     } catch (err) {
       setError(err.message);
       throw err;
@@ -79,6 +90,7 @@ export function WalletProvider({ children }) {
     setUser(null);
     setCircles([]);
     localStorage.removeItem("goalstake_wallet");
+    localStorage.removeItem("goalstake_username");
   }, []);
 
   const refreshCircles = useCallback(async () => {
@@ -98,6 +110,19 @@ export function WalletProvider({ children }) {
     }
   }, [wallet]);
 
+  const updateProfile = useCallback(async (updates) => {
+    if (!wallet) return;
+    try {
+      const profile = await userApi.updateProfile(wallet, updates);
+      setUser((prev) => ({ ...prev, ...profile }));
+      if (updates.username) {
+        localStorage.setItem("goalstake_username", updates.username);
+      }
+    } catch (err) {
+      throw err;
+    }
+  }, [wallet]);
+
   return (
     <WalletContext.Provider
       value={{
@@ -110,9 +135,16 @@ export function WalletProvider({ children }) {
         disconnectWallet,
         refreshCircles,
         refreshUser,
+        updateProfile,
       }}
     >
       {children}
+      {showConnectModal && (
+        <ConnectModal
+          onConnect={handleConnect}
+          onClose={() => setShowConnectModal(false)}
+        />
+      )}
     </WalletContext.Provider>
   );
 }

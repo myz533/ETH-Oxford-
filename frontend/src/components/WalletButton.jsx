@@ -1,5 +1,5 @@
 import { useWallet } from "../context/WalletContext";
-import { Wallet, LogOut, User, ChevronDown, Coins } from "lucide-react";
+import { LogOut, User, ChevronDown, Coins } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
 
@@ -21,14 +21,15 @@ export default function WalletButton() {
   if (!wallet) {
     return (
       <button onClick={connectWallet} className="btn-primary flex items-center gap-2">
-        <Wallet size={18} />
-        Connect Wallet
+        <User size={18} />
+        Sign In
       </button>
     );
   }
 
-  const displayName = user?.username || `${wallet.slice(0, 6)}...${wallet.slice(-4)}`;
+  const displayName = user?.username || wallet;
   const balance = user?.balance ?? user?.stats?.balance ?? 5000;
+  const avatarUrl = user?.avatar_url;
 
   return (
     <div className="relative" ref={menuRef}>
@@ -36,8 +37,12 @@ export default function WalletButton() {
         onClick={() => setShowMenu(!showMenu)}
         className="flex items-center gap-2 px-4 py-2 glass-hover rounded-xl"
       >
-        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center">
-          <User size={16} />
+        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center overflow-hidden">
+          {avatarUrl ? (
+            <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <User size={16} />
+          )}
         </div>
         <div className="flex flex-col items-start">
           <span className="font-medium text-sm leading-tight">{displayName}</span>
@@ -51,7 +56,7 @@ export default function WalletButton() {
       {showMenu && (
         <div className="absolute right-0 top-full mt-2 w-56 glass rounded-xl overflow-hidden shadow-xl z-50">
           <div className="p-3 border-b border-dark-700">
-            <p className="text-xs text-dark-400">Connected</p>
+            <p className="text-xs text-dark-400">User ID</p>
             <p className="text-sm font-mono truncate">{wallet}</p>
           </div>
           <div className="p-3 border-b border-dark-700">

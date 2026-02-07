@@ -49,7 +49,7 @@ export default function GoalCard({ goal, compact = false }) {
               {goal.title}
             </h3>
             <p className="text-xs text-dark-400 font-mono">
-              by {goal.creator_wallet?.slice(0, 6)}...{goal.creator_wallet?.slice(-4)}
+              by {goal.creator_wallet}
             </p>
           </div>
         </div>

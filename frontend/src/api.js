@@ -27,13 +27,19 @@ async function request(path, options = {}) {
 // ─────────────── USERS ───────────────
 
 export const userApi = {
-  register: (walletAddress, username, bio) =>
+  register: (walletAddress, username, bio, avatarData) =>
     request("/users/register", {
       method: "POST",
-      body: { walletAddress, username, bio },
+      body: { walletAddress, username, bio, avatarData },
     }),
 
   getProfile: (wallet) => request(`/users/${wallet}`),
+
+  updateProfile: (wallet, { username, avatarData, bio }) =>
+    request(`/users/${wallet}/profile`, {
+      method: "PUT",
+      body: { username, avatarData, bio },
+    }),
 
   getLeaderboard: () => request("/users/leaderboard/top"),
 

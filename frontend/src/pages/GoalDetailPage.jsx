@@ -206,7 +206,7 @@ export default function GoalDetailPage() {
                 </span>
               </div>
               <p className="text-dark-400 text-sm font-mono mt-1">
-                by {goal.creator_wallet?.slice(0, 8)}...{goal.creator_wallet?.slice(-6)}
+                by {goal.creator_wallet}
               </p>
             </div>
           </div>
@@ -569,7 +569,7 @@ export default function GoalDetailPage() {
                       {pos.is_yes ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
                     </span>
                     <span className="font-mono text-sm text-dark-300">
-                      {pos.wallet_address.slice(0, 6)}...{pos.wallet_address.slice(-4)}
+                      {pos.wallet_address}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">

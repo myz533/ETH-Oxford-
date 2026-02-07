@@ -1,19 +1,25 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useWallet } from "../context/WalletContext";
 import { userApi, goalApi } from "../api";
 import { Link } from "react-router-dom";
 import {
   Coins, Target, Trophy, TrendingUp, TrendingDown,
   Clock, CheckCircle, XCircle, ArrowUpRight, ArrowDownRight,
-  User, BarChart3
+  User, BarChart3, Camera, Pencil, Save, X
 } from "lucide-react";
 import toast from "react-hot-toast";
 
 export default function ProfilePage() {
-  const { wallet, user, refreshUser } = useWallet();
+  const { wallet, user, refreshUser, updateProfile } = useWallet();
   const [balanceHistory, setBalanceHistory] = useState([]);
   const [userGoals, setUserGoals] = useState({ created: [], staked: [] });
   const [loading, setLoading] = useState(true);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [editUsername, setEditUsername] = useState("");
+  const [editAvatarPreview, setEditAvatarPreview] = useState(null);
+  const [editAvatarData, setEditAvatarData] = useState(null);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const avatarInputRef = useRef(null);
 
   useEffect(() => {
     if (wallet) {
@@ -74,18 +80,112 @@ export default function ProfilePage() {
     award_received: "Award Received",
   };
 
+  const handleAvatarFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 500 * 1024) {
+      toast.error("Image must be under 500KB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setEditAvatarPreview(reader.result);
+      setEditAvatarData(reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const startEditing = () => {
+    setEditUsername(user?.username || "");
+    setEditAvatarPreview(user?.avatar_url || null);
+    setEditAvatarData(null);
+    setEditingProfile(true);
+  };
+
+  const saveProfile = async () => {
+    if (!editUsername.trim()) {
+      toast.error("Username is required");
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      await updateProfile({
+        username: editUsername.trim(),
+        avatarData: editAvatarData,
+      });
+      toast.success("Profile updated!");
+      setEditingProfile(false);
+      await refreshUser();
+    } catch (err) {
+      toast.error(err.message || "Failed to update profile");
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const avatarUrl = user?.avatar_url;
+
   return (
     <div className="min-h-screen pt-24 pb-12 px-4">
       <div className="max-w-3xl mx-auto">
         {/* Header */}
         <div className="text-center mb-6">
-          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center mx-auto mb-3 shadow-lg shadow-brand-600/25">
-            <User size={36} className="text-white" />
-          </div>
-          <h1 className="text-2xl font-bold">
-            {user?.username || `${wallet.slice(0, 8)}...${wallet.slice(-6)}`}
-          </h1>
-          <p className="text-dark-400 text-sm font-mono mt-1">{wallet}</p>
+          {editingProfile ? (
+            <>
+              <div
+                onClick={() => avatarInputRef.current?.click()}
+                className="w-20 h-20 rounded-full mx-auto mb-3 relative cursor-pointer group"
+              >
+                {editAvatarPreview ? (
+                  <img src={editAvatarPreview} alt="" className="w-full h-full rounded-full object-cover border-2 border-brand-500" />
+                ) : (
+                  <div className="w-full h-full rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center shadow-lg shadow-brand-600/25">
+                    <User size={36} className="text-white" />
+                  </div>
+                )}
+                <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  <Camera size={20} className="text-white" />
+                </div>
+              </div>
+              <input ref={avatarInputRef} type="file" accept="image/*" onChange={handleAvatarFileChange} className="hidden" />
+              <input
+                type="text"
+                value={editUsername}
+                onChange={(e) => setEditUsername(e.target.value)}
+                placeholder="Enter display name"
+                className="text-xl font-bold bg-dark-800 border border-dark-700 rounded-xl px-4 py-2 text-center text-white focus:outline-none focus:border-brand-500 mb-2"
+                maxLength={30}
+              />
+              <p className="text-dark-400 text-sm font-mono mt-1">ID: {wallet}</p>
+              <div className="flex items-center justify-center gap-2 mt-3">
+                <button onClick={saveProfile} disabled={savingProfile} className="btn-primary text-sm px-4 py-1.5 flex items-center gap-1.5">
+                  <Save size={14} /> {savingProfile ? "Saving..." : "Save"}
+                </button>
+                <button onClick={() => setEditingProfile(false)} className="text-sm px-4 py-1.5 bg-dark-800 text-dark-300 rounded-xl hover:bg-dark-700 flex items-center gap-1.5">
+                  <X size={14} /> Cancel
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="relative w-20 h-20 mx-auto mb-3 group">
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="" className="w-full h-full rounded-full object-cover border-2 border-brand-500 shadow-lg shadow-brand-600/25" />
+                ) : (
+                  <div className="w-full h-full rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center shadow-lg shadow-brand-600/25">
+                    <User size={36} className="text-white" />
+                  </div>
+                )}
+              </div>
+              <h1 className="text-2xl font-bold">
+                {user?.username || wallet}
+              </h1>
+              <p className="text-dark-400 text-sm font-mono mt-1">ID: {wallet}</p>
+              <button onClick={startEditing} className="mt-2 text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1 mx-auto">
+                <Pencil size={12} /> Edit Profile
+              </button>
+            </>
+          )}
         </div>
 
         {/* Balance Card */}
@@ -243,7 +343,7 @@ export default function ProfilePage() {
                 >
                   <div>
                     <p className="font-medium text-sm">{goal.title}</p>
-                    <p className="text-xs text-dark-500">by {goal.creator_wallet?.slice(0, 6)}...{goal.creator_wallet?.slice(-4)}</p>
+                    <p className="text-xs text-dark-500">by {goal.creator_wallet}</p>
                   </div>
                   <span className={`text-xs px-2 py-1 rounded-full ${
                     goal.status === 'achieved' ? 'bg-green-900/30 text-green-400' :
