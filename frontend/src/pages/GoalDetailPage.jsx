@@ -89,11 +89,12 @@ export default function GoalDetailPage() {
 
   const handleAward = async () => {
     try {
-      await goalApi.award(goalId, wallet, awardTo, awardAmount, awardMessage);
-      toast.success("Award sent! 🎁");
+      const result = await goalApi.award(goalId, wallet, awardTo, awardAmount, awardMessage);
+      toast.success(`Award of ${awardAmount} GSTK sent! 🎁`);
       setAwardTo("");
       setAwardAmount(5);
       setAwardMessage("");
+      refreshUser(); // Update balance in navbar
     } catch (err) {
       toast.error(err.message);
     }

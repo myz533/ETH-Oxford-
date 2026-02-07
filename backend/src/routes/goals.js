@@ -399,7 +399,52 @@ router.post(
       if (goal.creator_wallet !== fromWallet?.toLowerCase()) {
         return res.status(403).json({ error: "Only goal creator can award" });
       }
+      if (!toWallet || !amount || amount <= 0) {
+        return res.status(400).json({ error: "Valid recipient wallet and positive amount required" });
+      }
 
+      const sender = db.prepare("SELECT * FROM users WHERE wallet_address = ?")
+        .get(fromWallet.toLowerCase());
+      if (!sender) return res.status(404).json({ error: "Sender not found" });
+      if ((sender.balance || 0) < amount) {
+        return res.status(400).json({ error: `Insufficient balance. You have ${sender.balance} GSTK but are trying to send ${amount} GSTK.` });
+      }
+
+      // Ensure recipient user exists (auto-create if needed)
+      let recipient = db.prepare("SELECT * FROM users WHERE wallet_address = ?")
+        .get(toWallet.toLowerCase());
+      if (!recipient) {
+        db.prepare("INSERT INTO users (wallet_address, balance) VALUES (?, 5000)")
+          .run(toWallet.toLowerCase());
+        recipient = db.prepare("SELECT * FROM users WHERE wallet_address = ?")
+          .get(toWallet.toLowerCase());
+      }
+
+      // Deduct from sender
+      db.prepare("UPDATE users SET balance = balance - ? WHERE wallet_address = ?")
+        .run(amount, fromWallet.toLowerCase());
+
+      const senderNewBalance = db.prepare("SELECT balance FROM users WHERE wallet_address = ?")
+        .get(fromWallet.toLowerCase()).balance;
+
+      db.prepare(`
+        INSERT INTO balance_history (wallet_address, change_amount, balance_after, reason, goal_id)
+        VALUES (?, ?, ?, 'award_given', ?)
+      `).run(fromWallet.toLowerCase(), -amount, senderNewBalance, goalId);
+
+      // Credit to recipient
+      db.prepare("UPDATE users SET balance = balance + ? WHERE wallet_address = ?")
+        .run(amount, toWallet.toLowerCase());
+
+      const recipientNewBalance = db.prepare("SELECT balance FROM users WHERE wallet_address = ?")
+        .get(toWallet.toLowerCase()).balance;
+
+      db.prepare(`
+        INSERT INTO balance_history (wallet_address, change_amount, balance_after, reason, goal_id)
+        VALUES (?, ?, ?, 'award_received', ?)
+      `).run(toWallet.toLowerCase(), amount, recipientNewBalance, goalId);
+
+      // Record the award
       db.prepare(`
         INSERT INTO awards (goal_id, from_wallet, to_wallet, amount, message)
         VALUES (?, ?, ?, ?, ?)
@@ -410,7 +455,7 @@ router.post(
         VALUES (?, ?, ?, 'award_given', ?)
       `).run(goal.circle_id, goalId, fromWallet.toLowerCase(), `Awarded ${amount} GSTK to ${toWallet}`);
 
-      res.json({ success: true });
+      res.json({ success: true, senderBalance: senderNewBalance, recipientBalance: recipientNewBalance });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
