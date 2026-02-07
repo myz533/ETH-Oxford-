@@ -8,6 +8,7 @@ import CircleDetailPage from "./pages/CircleDetailPage";
 import GoalsPage from "./pages/GoalsPage";
 import GoalDetailPage from "./pages/GoalDetailPage";
 import LeaderboardPage from "./pages/LeaderboardPage";
+import ProfilePage from "./pages/ProfilePage";
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
             <Route path="/goals" element={<GoalsPage />} />
             <Route path="/goals/:goalId" element={<GoalDetailPage />} />
             <Route path="/leaderboard" element={<LeaderboardPage />} />
+            <Route path="/profile" element={<ProfilePage />} />
           </Routes>
         </div>
         <Toaster

@@ -1,12 +1,13 @@
 import { Link, useLocation } from "react-router-dom";
 import WalletButton from "./WalletButton";
-import { Target, Users, Trophy, BarChart3, Home } from "lucide-react";
+import { Target, Users, Trophy, BarChart3, Home, Coins } from "lucide-react";
 
 const navItems = [
   { path: "/", label: "Home", icon: Home },
   { path: "/circles", label: "Circles", icon: Users },
   { path: "/goals", label: "Goals", icon: Target },
   { path: "/leaderboard", label: "Leaderboard", icon: Trophy },
+  { path: "/profile", label: "My Progress", icon: BarChart3 },
 ];
 
 export default function Navbar() {

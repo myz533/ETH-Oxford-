@@ -10,18 +10,23 @@ import "./FriendCircle.sol";
  * @title GoalMarket
  * @notice The core prediction market for personal goals.
  *
- *  MECHANISM:
- *  1. A user creates a Goal with a deadline and stakes tokens as commitment
- *  2. Friends in the circle can buy YES (they believe) or NO (they doubt) positions
- *  3. Price follows a simple bonding curve (LMSR-inspired)
- *  4. When deadline passes, the goal creator submits proof
- *  5. Circle members verify the proof (>50% approval = achieved)
- *  6. Market resolves: winners get proportional payouts
- *  7. Achiever can optionally award bonus tokens to supporters
+ *  MECHANISM (No-Arbitrage Design):
+ *  1. Creator stakes tokens as commitment (separate from YES/NO pools)
+ *  2. Friends buy YES (believe) or NO (doubt) positions
+ *  3. Max total betting pool is capped at POT_MULTIPLIER x creator's stake
+ *  4. When deadline passes, creator submits proof; circle verifies
  *
- *  This creates a novel social incentive: friends are financially
- *  motivated to support each other's goals, and goal-setters have
- *  skin in the game through their initial stake.
+ *  PAYOUTS ON SUCCESS (goal achieved):
+ *    - Creator:   gets stake back + entire NO pool (minus fee)
+ *    - YES bets:  get their tokens back (they supported - no loss)
+ *    - NO bets:   lose everything (funds go to creator)
+ *
+ *  PAYOUTS ON FAILURE (goal not achieved):
+ *    - Creator:   loses entire stake (distributed to NO bettors)
+ *    - YES bets:  lose everything (funds go to NO bettors)
+ *    - NO bets:   get tokens back + proportional share of (creator stake + YES pool) minus fee
+ *
+ *  ZERO-SUM: total payouts + fees = total deposits. No arbitrage possible.
  */
 contract GoalMarket is Ownable, ReentrancyGuard {
     GoalToken public token;
@@ -36,9 +41,10 @@ contract GoalMarket is Ownable, ReentrancyGuard {
         string title;
         string description;
         uint256 deadline;
-        uint256 creatorStake;
-        uint256 yesPool;          // Total tokens staked on YES
-        uint256 noPool;           // Total tokens staked on NO
+        uint256 creatorStake;     // Creator's commitment (separate pot)
+        uint256 yesPool;          // Total tokens staked on YES by friends
+        uint256 noPool;           // Total tokens staked on NO by friends
+        uint256 maxPool;          // Max total YES+NO pool (proportional to stake)
         GoalStatus status;
         string proofURI;          // IPFS/URL to proof of achievement
         uint256 verifyYes;        // Number of verify-yes votes
@@ -57,6 +63,7 @@ contract GoalMarket is Ownable, ReentrancyGuard {
     uint256 public constant MIN_STAKE = 10 * 10 ** 18;       // 10 GSTK minimum stake
     uint256 public constant PLATFORM_FEE_BPS = 200;          // 2% platform fee
     uint256 public constant VERIFICATION_QUORUM_BPS = 5000;  // 50% of circle must verify
+    uint256 public constant POT_MULTIPLIER = 5;              // Max pool = 5x creator stake
 
     // goalId => Goal
     mapping(uint256 => Goal) public goals;
@@ -75,7 +82,8 @@ contract GoalMarket is Ownable, ReentrancyGuard {
         address indexed creator,
         string title,
         uint256 deadline,
-        uint256 stake
+        uint256 stake,
+        uint256 maxPool
     );
     event PositionTaken(
         uint256 indexed goalId,
@@ -94,9 +102,10 @@ contract GoalMarket is Ownable, ReentrancyGuard {
         friendCircle = FriendCircle(_friendCircle);
     }
 
-    // ─────────────────────────── GOAL CREATION ───────────────────────────
+    // ─────────────────────── GOAL CREATION ───────────────────────
 
     /// @notice Create a new goal and stake tokens as commitment
+    /// @dev Creator's stake goes into a separate pot, NOT into YES/NO pools
     function createGoal(
         uint256 circleId,
         string calldata title,
@@ -109,7 +118,7 @@ contract GoalMarket is Ownable, ReentrancyGuard {
         require(stakeAmount >= MIN_STAKE, "GoalMarket: stake too low");
         require(bytes(title).length > 0 && bytes(title).length <= 200, "GoalMarket: invalid title");
 
-        // Transfer creator's stake
+        // Transfer creator's stake into the contract
         require(token.transferFrom(msg.sender, address(this), stakeAmount), "GoalMarket: transfer failed");
 
         uint256 goalId = nextGoalId++;
@@ -122,25 +131,23 @@ contract GoalMarket is Ownable, ReentrancyGuard {
         goal.description = description;
         goal.deadline = deadline;
         goal.creatorStake = stakeAmount;
-        goal.yesPool = stakeAmount; // Creator's stake seeds the YES pool
+        goal.yesPool = 0;            // Friends bet separately
+        goal.noPool = 0;
+        goal.maxPool = stakeAmount * POT_MULTIPLIER;  // Cap proportional to stake
         goal.status = GoalStatus.Active;
         goal.createdAt = block.timestamp;
-
-        // Creator automatically has a YES position
-        positions[goalId][msg.sender].yesAmount = stakeAmount;
 
         circleGoals[circleId].push(goalId);
         userGoals[msg.sender].push(goalId);
 
-        emit GoalCreated(goalId, circleId, msg.sender, title, deadline, stakeAmount);
-        emit PositionTaken(goalId, msg.sender, true, stakeAmount);
+        emit GoalCreated(goalId, circleId, msg.sender, title, deadline, stakeAmount, goal.maxPool);
 
         return goalId;
     }
 
-    // ─────────────────────────── TRADING ───────────────────────────
+    // ─────────────────────── TRADING ───────────────────────────
 
-    /// @notice Buy a YES or NO position on a goal
+    /// @notice Buy a YES or NO position on a goal (friends only, not creator)
     function takePosition(
         uint256 goalId,
         bool isYes,
@@ -150,7 +157,22 @@ contract GoalMarket is Ownable, ReentrancyGuard {
         require(goal.status == GoalStatus.Active, "GoalMarket: goal not active");
         require(block.timestamp < goal.deadline, "GoalMarket: deadline passed");
         require(friendCircle.isMember(goal.circleId, msg.sender), "GoalMarket: not in circle");
+        require(msg.sender != goal.creator, "GoalMarket: creator cannot bet on own goal");
         require(amount > 0, "GoalMarket: zero amount");
+
+        // Enforce single-side betting: user can only bet on one side
+        Position storage existingPos = positions[goalId][msg.sender];
+        if (isYes) {
+            require(existingPos.noAmount == 0, "GoalMarket: already have NO position, cannot bet YES");
+        } else {
+            require(existingPos.yesAmount == 0, "GoalMarket: already have YES position, cannot bet NO");
+        }
+
+        // Enforce max pool cap (proportional to creator stake)
+        require(
+            goal.yesPool + goal.noPool + amount <= goal.maxPool,
+            "GoalMarket: would exceed max pool size"
+        );
 
         require(token.transferFrom(msg.sender, address(this), amount), "GoalMarket: transfer failed");
 
@@ -165,7 +187,7 @@ contract GoalMarket is Ownable, ReentrancyGuard {
         emit PositionTaken(goalId, msg.sender, isYes, amount);
     }
 
-    // ─────────────────────────── MARKET PRICING ───────────────────────────
+    // ─────────────────────── MARKET PRICING ───────────────────────────
 
     /// @notice Get the implied probability of goal achievement (0-10000 bps)
     function getImpliedProbability(uint256 goalId) external view returns (uint256) {
@@ -180,7 +202,15 @@ contract GoalMarket is Ownable, ReentrancyGuard {
         return (goals[goalId].yesPool, goals[goalId].noPool);
     }
 
-    // ─────────────────────────── PROOF & VERIFICATION ───────────────────────────
+    /// @notice Get remaining capacity in the betting pool
+    function getRemainingPoolCapacity(uint256 goalId) external view returns (uint256) {
+        Goal storage goal = goals[goalId];
+        uint256 used = goal.yesPool + goal.noPool;
+        if (used >= goal.maxPool) return 0;
+        return goal.maxPool - used;
+    }
+
+    // ─────────────────────── PROOF & VERIFICATION ───────────────────────
 
     /// @notice Goal creator submits proof of achievement
     function submitProof(uint256 goalId, string calldata proofURI) external {
@@ -221,7 +251,6 @@ contract GoalMarket is Ownable, ReentrancyGuard {
         uint256 totalVotes = goal.verifyYes + goal.verifyNo;
         uint256 quorum = (memberCount * VERIFICATION_QUORUM_BPS) / 10000;
 
-        // Need at least 1 vote and quorum reached (excluding creator)
         if (totalVotes >= quorum && totalVotes > 0) {
             _resolveGoal(goalId);
         }
@@ -251,15 +280,60 @@ contract GoalMarket is Ownable, ReentrancyGuard {
         emit GoalResolved(goalId, goal.status);
     }
 
-    // ─────────────────────────── CLAIMS & PAYOUTS ───────────────────────────
+    // ─────────────────────── CLAIMS & PAYOUTS ───────────────────────
+    //
+    //  ACHIEVED (success):
+    //    Creator  -> creatorStake + noPool - fee(noPool)
+    //    YES bets -> get yesAmount back (supported the creator)
+    //    NO bets  -> lose everything (funds go to creator)
+    //
+    //  FAILED:
+    //    Creator  -> loses creatorStake
+    //    YES bets -> lose everything
+    //    NO bets  -> noAmount back + proportional share of (creatorStake + yesPool) - fee
+    //
+    //  Zero-sum: totalPayout + fees = creatorStake + yesPool + noPool
+    //
 
-    /// @notice Claim winnings after a goal is resolved
+    /// @notice Creator claims payout after goal is resolved
+    function claimCreator(uint256 goalId) external nonReentrant {
+        Goal storage goal = goals[goalId];
+        require(
+            goal.status == GoalStatus.Achieved || goal.status == GoalStatus.Failed,
+            "GoalMarket: not resolved"
+        );
+        require(msg.sender == goal.creator, "GoalMarket: not creator");
+
+        // Use the position's claimed flag for the creator too
+        Position storage pos = positions[goalId][msg.sender];
+        require(!pos.claimed, "GoalMarket: already claimed");
+        pos.claimed = true;
+
+        uint256 payout = 0;
+
+        if (goal.status == GoalStatus.Achieved) {
+            // Creator WINS: gets stake back + all NO pool (minus fee on winnings)
+            uint256 winnings = goal.noPool;
+            uint256 fee = (winnings * PLATFORM_FEE_BPS) / 10000;
+            payout = goal.creatorStake + winnings - fee;
+        }
+        // If Failed: creator gets nothing (loses entire stake)
+
+        if (payout > 0) {
+            require(token.transfer(msg.sender, payout), "GoalMarket: payout failed");
+        }
+
+        emit Claimed(goalId, msg.sender, payout);
+    }
+
+    /// @notice Friends claim payout after goal is resolved
     function claim(uint256 goalId) external nonReentrant {
         Goal storage goal = goals[goalId];
         require(
             goal.status == GoalStatus.Achieved || goal.status == GoalStatus.Failed,
             "GoalMarket: not resolved"
         );
+        require(msg.sender != goal.creator, "GoalMarket: creator must use claimCreator");
 
         Position storage pos = positions[goalId][msg.sender];
         require(!pos.claimed, "GoalMarket: already claimed");
@@ -267,34 +341,38 @@ contract GoalMarket is Ownable, ReentrancyGuard {
 
         pos.claimed = true;
 
-        uint256 totalPool = goal.yesPool + goal.noPool;
         uint256 payout = 0;
 
         if (goal.status == GoalStatus.Achieved) {
-            // YES holders win
+            // ── YES holders win ──
+            // They get their tokens back (supported the creator)
             if (pos.yesAmount > 0) {
-                payout = (pos.yesAmount * totalPool) / goal.yesPool;
+                payout = pos.yesAmount;
             }
+            // NO holders: lose everything (no payout)
         } else {
-            // NO holders win
-            if (pos.noAmount > 0) {
-                payout = (pos.noAmount * totalPool) / goal.noPool;
+            // ── FAILED: NO holders win ──
+            if (pos.noAmount > 0 && goal.noPool > 0) {
+                // Losers' funds to distribute: creatorStake + entire yesPool
+                uint256 loserFunds = goal.creatorStake + goal.yesPool;
+                uint256 fee = (loserFunds * PLATFORM_FEE_BPS) / 10000;
+                uint256 distributable = loserFunds - fee;
+
+                // Each NO bettor gets: their stake back + proportional share of loser funds
+                uint256 bonus = (pos.noAmount * distributable) / goal.noPool;
+                payout = pos.noAmount + bonus;
             }
+            // YES holders: lose everything (no payout)
         }
 
         if (payout > 0) {
-            // Deduct platform fee
-            uint256 fee = (payout * PLATFORM_FEE_BPS) / 10000;
-            uint256 netPayout = payout - fee;
-
-            require(token.transfer(msg.sender, netPayout), "GoalMarket: payout failed");
-            // Fee stays in contract (treasury)
+            require(token.transfer(msg.sender, payout), "GoalMarket: payout failed");
         }
 
         emit Claimed(goalId, msg.sender, payout);
     }
 
-    // ─────────────────────────── SOCIAL AWARDS ───────────────────────────
+    // ─────────────────────── SOCIAL AWARDS ───────────────────────
 
     /// @notice Goal achiever can award bonus tokens to supporters
     function awardSupporter(uint256 goalId, address supporter, uint256 amount) external nonReentrant {
@@ -309,7 +387,7 @@ contract GoalMarket is Ownable, ReentrancyGuard {
         emit AwardGiven(goalId, msg.sender, supporter, amount);
     }
 
-    // ─────────────────────────── VIEW FUNCTIONS ───────────────────────────
+    // ─────────────────────── VIEW FUNCTIONS ───────────────────────
 
     function getGoal(uint256 goalId) external view returns (Goal memory) {
         return goals[goalId];

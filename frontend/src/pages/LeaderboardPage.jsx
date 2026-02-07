@@ -77,17 +77,17 @@ export default function LeaderboardPage() {
                 <div className="flex items-center gap-4 flex-shrink-0 text-right">
                   <div>
                     <p className="font-bold text-brand-400 flex items-center gap-1">
+                      <Coins size={14} />
+                      {Math.round(user.balance ?? 5000)}
+                    </p>
+                    <p className="text-xs text-dark-500">balance</p>
+                  </div>
+                  <div>
+                    <p className="font-bold text-dark-300 flex items-center gap-1">
                       <Target size={14} />
                       {user.goals_achieved}
                     </p>
                     <p className="text-xs text-dark-500">achieved</p>
-                  </div>
-                  <div>
-                    <p className="font-bold text-dark-300 flex items-center gap-1">
-                      <Coins size={14} />
-                      {Math.round(user.total_staked || 0)}
-                    </p>
-                    <p className="text-xs text-dark-500">staked</p>
                   </div>
                 </div>
               </div>

@@ -86,6 +86,20 @@ router.get("/:wallet", (req, res) => {
       .prepare("SELECT COUNT(*) as count FROM circle_members WHERE wallet_address = ?")
       .get(wallet).count;
 
+    // Wins & losses
+    const totalWins = db
+      .prepare("SELECT COALESCE(SUM(payout), 0) as total FROM claims WHERE wallet_address = ? AND payout > 0")
+      .get(wallet).total;
+
+    const totalLosses = db
+      .prepare(`
+        SELECT COALESCE(SUM(p.amount), 0) as total FROM positions p
+        INNER JOIN goals g ON g.id = p.goal_id
+        INNER JOIN claims c ON c.goal_id = p.goal_id AND c.wallet_address = p.wallet_address
+        WHERE p.wallet_address = ? AND c.payout = 0
+      `)
+      .get(wallet).total;
+
     res.json({
       ...user,
       stats: {
@@ -94,6 +108,9 @@ router.get("/:wallet", (req, res) => {
         successRate: goalsCreated > 0 ? Math.round((goalsAchieved / goalsCreated) * 100) : 0,
         totalStaked,
         circleCount,
+        totalWins: Math.round(totalWins * 100) / 100,
+        totalLosses: Math.round(totalLosses * 100) / 100,
+        balance: user.balance,
       },
     });
   } catch (error) {
@@ -112,6 +129,7 @@ router.get("/leaderboard/top", (req, res) => {
         u.wallet_address,
         u.username,
         u.avatar_url,
+        u.balance,
         COUNT(CASE WHEN g.status = 'achieved' THEN 1 END) as goals_achieved,
         COUNT(g.id) as total_goals,
         COALESCE(SUM(p.total_staked), 0) as total_staked
@@ -121,11 +139,28 @@ router.get("/leaderboard/top", (req, res) => {
         SELECT wallet_address, SUM(amount) as total_staked FROM positions GROUP BY wallet_address
       ) p ON p.wallet_address = u.wallet_address
       GROUP BY u.wallet_address
-      ORDER BY goals_achieved DESC, total_staked DESC
+      ORDER BY u.balance DESC, goals_achieved DESC
       LIMIT 20
     `).all();
 
     res.json(leaderboard);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─────────────── BALANCE HISTORY ───────────────
+
+router.get("/:wallet/balance-history", (req, res) => {
+  try {
+    const db = getDb();
+    const wallet = req.params.wallet.toLowerCase();
+
+    const history = db
+      .prepare("SELECT * FROM balance_history WHERE wallet_address = ? ORDER BY created_at DESC LIMIT 50")
+      .all(wallet);
+
+    res.json(history);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

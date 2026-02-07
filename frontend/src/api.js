@@ -36,6 +36,8 @@ export const userApi = {
   getProfile: (wallet) => request(`/users/${wallet}`),
 
   getLeaderboard: () => request("/users/leaderboard/top"),
+
+  getBalanceHistory: (wallet) => request(`/users/${wallet}/balance-history`),
 };
 
 // ─────────────── CIRCLES ───────────────
@@ -95,6 +97,12 @@ export const goalApi = {
     request(`/goals/${goalId}/award`, {
       method: "POST",
       body: { fromWallet, toWallet, amount, message },
+    }),
+
+  claim: (goalId, walletAddress) =>
+    request(`/goals/${goalId}/claim`, {
+      method: "POST",
+      body: { walletAddress },
     }),
 
   getUserGoals: (wallet) => request(`/goals/user/${wallet}`),

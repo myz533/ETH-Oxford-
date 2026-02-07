@@ -163,7 +163,8 @@ export default function CreateGoalModal({ circleId, onClose, onCreated }) {
               </span>
             </div>
             <p className="mt-1 text-xs text-dark-500">
-              Minimum 10 GSTK. This seeds the YES pool — you're betting on yourself!
+              Minimum 10 GSTK. This is your commitment — if you succeed, you get it back plus all NO bets.
+              If you fail, you lose it all. Max betting pool: {Math.max(10, Number(form.stakeAmount) || 0) * 5} GSTK.
             </p>
           </div>
 

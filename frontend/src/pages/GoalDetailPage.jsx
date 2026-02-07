@@ -5,13 +5,13 @@ import { goalApi } from "../api";
 import {
   ArrowLeft, TrendingUp, TrendingDown, Clock, CheckCircle,
   XCircle, AlertCircle, Upload, ThumbsUp, ThumbsDown, Gift,
-  Coins, Users
+  Coins, Users, Trophy, ShieldAlert, Info
 } from "lucide-react";
 import toast from "react-hot-toast";
 
 export default function GoalDetailPage() {
   const { goalId } = useParams();
-  const { wallet } = useWallet();
+  const { wallet, refreshUser } = useWallet();
   const [goal, setGoal] = useState(null);
   const [loading, setLoading] = useState(true);
   const [stakeAmount, setStakeAmount] = useState(10);
@@ -21,6 +21,7 @@ export default function GoalDetailPage() {
   const [awardTo, setAwardTo] = useState("");
   const [awardAmount, setAwardAmount] = useState(5);
   const [awardMessage, setAwardMessage] = useState("");
+  const [claiming, setClaiming] = useState(false);
 
   useEffect(() => {
     loadGoal();
@@ -42,6 +43,7 @@ export default function GoalDetailPage() {
       await goalApi.takePosition(goalId, wallet, isYes, stakeAmount);
       toast.success(`Staked ${stakeAmount} GSTK on ${isYes ? "YES" : "NO"}!`);
       loadGoal();
+      refreshUser();
     } catch (err) {
       toast.error(err.message);
     }
@@ -64,6 +66,24 @@ export default function GoalDetailPage() {
       loadGoal();
     } catch (err) {
       toast.error(err.message);
+    }
+  };
+
+  const handleClaim = async () => {
+    setClaiming(true);
+    try {
+      const result = await goalApi.claim(goalId, wallet);
+      if (result.payout > 0) {
+        toast.success(`Claimed ${result.payout} GSTK! 🎉`);
+      } else {
+        toast.error("No payout — you lost this round 😔");
+      }
+      loadGoal();
+      refreshUser();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setClaiming(false);
     }
   };
 
@@ -102,6 +122,47 @@ export default function GoalDetailPage() {
   const hasVerified = goal.verifications?.some(
     (v) => v.wallet_address === wallet?.toLowerCase()
   );
+  const hasClaimed = goal.claims?.some(
+    (c) => c.wallet_address === wallet?.toLowerCase()
+  );
+  const isResolved = goal.status === "achieved" || goal.status === "failed";
+
+  // Calculate user's position
+  const userYes = goal.positions?.filter(p => p.wallet_address === wallet?.toLowerCase() && p.is_yes).reduce((s, p) => s + p.amount, 0) || 0;
+  const userNo = goal.positions?.filter(p => p.wallet_address === wallet?.toLowerCase() && !p.is_yes).reduce((s, p) => s + p.amount, 0) || 0;
+
+  // Calculate potential payout
+  const calcPayout = () => {
+    if (!isResolved) return null;
+    const yesPool = goal.yesPool || 0;
+    const noPool = goal.noPool || 0;
+    const stake = goal.stake_amount || 0;
+
+    if (isCreator) {
+      if (goal.status === "achieved") {
+        const fee = (noPool * 0.02);
+        return stake + noPool - fee;
+      }
+      return 0;
+    }
+
+    if (goal.status === "achieved") {
+      return userYes; // YES holders get tokens back
+    } else {
+      if (userNo > 0 && noPool > 0) {
+        const loserFunds = stake + yesPool;
+        const fee = loserFunds * 0.02;
+        const bonus = (userNo * (loserFunds - fee)) / noPool;
+        return userNo + bonus;
+      }
+      return 0;
+    }
+  };
+
+  const potentialPayout = calcPayout();
+
+  const maxPool = goal.maxPool || goal.max_pool || (goal.stake_amount * 5);
+  const remainingCapacity = goal.remainingCapacity ?? Math.max(0, maxPool - (goal.totalPool || 0));
 
   const categoryEmojis = {
     fitness: "💪", learning: "📚", career: "💼", health: "🏥",
@@ -154,20 +215,43 @@ export default function GoalDetailPage() {
           )}
 
           {/* Stats Row */}
-          <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-4 gap-3 mb-4">
             <div className="text-center p-3 bg-dark-800 rounded-xl">
               <p className="text-2xl font-bold text-brand-400">{probability}%</p>
               <p className="text-xs text-dark-400">Probability</p>
             </div>
             <div className="text-center p-3 bg-dark-800 rounded-xl">
+              <p className="text-2xl font-bold text-yellow-400">{Math.round(goal.stake_amount || 0)}</p>
+              <p className="text-xs text-dark-400">Creator Stake</p>
+            </div>
+            <div className="text-center p-3 bg-dark-800 rounded-xl">
               <p className="text-2xl font-bold">{Math.round(goal.totalPool || 0)}</p>
-              <p className="text-xs text-dark-400">GSTK Pool</p>
+              <p className="text-xs text-dark-400">Betting Pool</p>
             </div>
             <div className="text-center p-3 bg-dark-800 rounded-xl">
               <p className="text-2xl font-bold">{daysLeft}</p>
               <p className="text-xs text-dark-400">Days Left</p>
             </div>
           </div>
+
+          {/* Pool Cap Bar */}
+          {goal.status === "active" && (
+            <div className="mb-4 p-3 bg-dark-800/50 rounded-xl">
+              <div className="flex items-center justify-between text-xs mb-1.5">
+                <span className="text-dark-400">Pool Capacity</span>
+                <span className="text-dark-300 font-mono">
+                  {Math.round(goal.totalPool || 0)} / {Math.round(maxPool)} GSTK
+                </span>
+              </div>
+              <div className="h-2 rounded-full overflow-hidden bg-dark-700">
+                <div
+                  className="h-full rounded-full bg-brand-500/60 transition-all duration-500"
+                  style={{ width: `${Math.min(100, ((goal.totalPool || 0) / maxPool) * 100)}%` }}
+                />
+              </div>
+              <p className="text-xs text-dark-500 mt-1">{Math.round(remainingCapacity)} GSTK remaining</p>
+            </div>
+          )}
 
           {/* Probability Bar */}
           <div>
@@ -193,6 +277,113 @@ export default function GoalDetailPage() {
           </div>
         </div>
 
+        {/* Payout Rules Info */}
+        <div className="card mb-6 border-dark-700/50">
+          <h2 className="text-sm font-bold mb-3 flex items-center gap-2 text-dark-300">
+            <Info size={16} className="text-brand-400" />
+            Payout Rules
+          </h2>
+          <div className="grid grid-cols-2 gap-4 text-xs">
+            <div className="p-3 bg-green-900/10 rounded-xl border border-green-800/20">
+              <p className="font-bold text-green-400 mb-2">✅ If Goal Succeeds</p>
+              <ul className="space-y-1 text-dark-300">
+                <li>• <span className="text-yellow-400">Creator</span>: stake back + all NO pool</li>
+                <li>• <span className="text-brand-400">YES bettors</span>: get tokens back</li>
+                <li>• <span className="text-red-400">NO bettors</span>: lose everything</li>
+              </ul>
+            </div>
+            <div className="p-3 bg-red-900/10 rounded-xl border border-red-800/20">
+              <p className="font-bold text-red-400 mb-2">❌ If Goal Fails</p>
+              <ul className="space-y-1 text-dark-300">
+                <li>• <span className="text-yellow-400">Creator</span>: loses entire stake</li>
+                <li>• <span className="text-brand-400">YES bettors</span>: lose everything</li>
+                <li>• <span className="text-red-400">NO bettors</span>: tokens back + bonus</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        {/* Your Position */}
+        {wallet && (userYes > 0 || userNo > 0 || isCreator) && (
+          <div className="card mb-6 border-brand-600/20">
+            <h2 className="text-lg font-bold mb-3 flex items-center gap-2">
+              <ShieldAlert size={20} className="text-brand-400" />
+              Your Position
+            </h2>
+            <div className="grid grid-cols-3 gap-3">
+              {isCreator && (
+                <div className="text-center p-3 bg-yellow-900/10 rounded-xl border border-yellow-800/20">
+                  <p className="text-lg font-bold text-yellow-400">{Math.round(goal.stake_amount || 0)}</p>
+                  <p className="text-xs text-dark-400">Creator Stake</p>
+                </div>
+              )}
+              {userYes > 0 && (
+                <div className="text-center p-3 bg-green-900/10 rounded-xl border border-green-800/20">
+                  <p className="text-lg font-bold text-brand-400">{Math.round(userYes)}</p>
+                  <p className="text-xs text-dark-400">YES Position</p>
+                </div>
+              )}
+              {userNo > 0 && (
+                <div className="text-center p-3 bg-red-900/10 rounded-xl border border-red-800/20">
+                  <p className="text-lg font-bold text-red-400">{Math.round(userNo)}</p>
+                  <p className="text-xs text-dark-400">NO Position</p>
+                </div>
+              )}
+            </div>
+            {isResolved && potentialPayout !== null && (
+              <div className={`mt-3 p-3 rounded-xl text-center ${potentialPayout > 0 ? 'bg-green-900/20 border border-green-800/30' : 'bg-red-900/20 border border-red-800/30'}`}>
+                <p className={`text-lg font-bold ${potentialPayout > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {potentialPayout > 0 ? `+${Math.round(potentialPayout * 100) / 100} GSTK` : 'No payout'}
+                </p>
+                <p className="text-xs text-dark-400">
+                  {potentialPayout > 0 ? 'Your payout' : 'You lost this round'}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Claim Payout Button */}
+        {isResolved && wallet && !hasClaimed && (isCreator || userYes > 0 || userNo > 0) && (
+          <div className="card mb-6">
+            <h2 className="text-lg font-bold mb-3 flex items-center gap-2">
+              <Trophy size={20} className="text-yellow-400" />
+              Claim Your Payout
+            </h2>
+            <button
+              onClick={handleClaim}
+              disabled={claiming}
+              className="btn-primary w-full py-3 text-lg"
+            >
+              {claiming ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Claiming...
+                </span>
+              ) : (
+                "💰 Claim Payout"
+              )}
+            </button>
+            {potentialPayout === 0 && (
+              <p className="text-xs text-dark-500 text-center mt-2">
+                You have no payout, but claiming will record the result.
+              </p>
+            )}
+          </div>
+        )}
+
+        {hasClaimed && (
+          <div className="card mb-6 border-green-800/20 bg-green-900/5">
+            <p className="text-center text-green-400 font-semibold flex items-center justify-center gap-2">
+              <CheckCircle size={18} />
+              Payout claimed!
+            </p>
+          </div>
+        )}
+
         {/* Trading Panel */}
         {goal.status === "active" && wallet && !isCreator && (
           <div className="card mb-6">
@@ -200,28 +391,45 @@ export default function GoalDetailPage() {
               <Coins size={20} className="text-brand-400" />
               Take a Position
             </h2>
-            <div className="flex items-center gap-3 mb-4">
+
+            {/* Single-side warning */}
+            {(userYes > 0 || userNo > 0) && (
+              <div className="mb-3 p-2.5 bg-yellow-900/10 border border-yellow-800/20 rounded-xl">
+                <p className="text-xs text-yellow-400 flex items-center gap-1.5">
+                  <AlertCircle size={14} />
+                  You already have a <strong>{userYes > 0 ? 'YES' : 'NO'}</strong> position ({Math.round(userYes || userNo)} GSTK). You can only add more to the same side.
+                </p>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 mb-2">
               <input
                 type="number"
                 className="input flex-1"
                 min={1}
+                max={remainingCapacity}
                 value={stakeAmount}
                 onChange={(e) => setStakeAmount(Number(e.target.value))}
                 placeholder="Amount"
               />
               <span className="text-dark-400 text-sm font-mono">GSTK</span>
             </div>
+            <p className="text-xs text-dark-500 mb-4">
+              Max you can bet: {Math.round(remainingCapacity)} GSTK (pool cap: {Math.round(maxPool)} GSTK)
+            </p>
             <div className="grid grid-cols-2 gap-3">
               <button
                 onClick={() => handleStake(true)}
-                className="py-3 px-6 bg-brand-600/20 hover:bg-brand-600/30 text-brand-400 font-bold rounded-xl border border-brand-600/30 transition-all flex items-center justify-center gap-2"
+                disabled={remainingCapacity <= 0 || userNo > 0}
+                className="py-3 px-6 bg-brand-600/20 hover:bg-brand-600/30 text-brand-400 font-bold rounded-xl border border-brand-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 <TrendingUp size={18} />
                 Stake YES
               </button>
               <button
                 onClick={() => handleStake(false)}
-                className="py-3 px-6 bg-red-600/20 hover:bg-red-600/30 text-red-400 font-bold rounded-xl border border-red-600/30 transition-all flex items-center justify-center gap-2"
+                disabled={remainingCapacity <= 0 || userYes > 0}
+                className="py-3 px-6 bg-red-600/20 hover:bg-red-600/30 text-red-400 font-bold rounded-xl border border-red-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 <TrendingDown size={18} />
                 Stake NO

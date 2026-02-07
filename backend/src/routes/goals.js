@@ -32,17 +32,38 @@ router.post(
       }
 
       const stake = stakeAmount || 10;
+      const maxPool = stake * 5; // Max total YES+NO pool = 5x creator stake
+
+      // Check creator has enough balance
+      const creator = db
+        .prepare("SELECT * FROM users WHERE wallet_address = ?")
+        .get(creatorWallet.toLowerCase());
+
+      if (!creator) {
+        return res.status(404).json({ error: "User not found. Connect wallet first." });
+      }
+      if ((creator.balance || 0) < stake) {
+        return res.status(400).json({ error: `Insufficient balance. You have ${creator.balance} GSTK but need ${stake} GSTK.` });
+      }
 
       const result = db.prepare(`
-        INSERT INTO goals (circle_id, creator_wallet, title, description, category, deadline, stake_amount, yes_pool, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
-      `).run(circleId, creatorWallet.toLowerCase(), title, description || "", category || "general", deadline, stake, stake);
+        INSERT INTO goals (circle_id, creator_wallet, title, description, category, deadline, stake_amount, yes_pool, no_pool, max_pool, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, 'active')
+      `).run(circleId, creatorWallet.toLowerCase(), title, description || "", category || "general", deadline, stake, maxPool);
 
-      // Creator auto-takes YES position
+      // Creator's stake is a separate commitment — NOT in YES/NO pools
+
+      // Deduct creator's stake from their balance
+      db.prepare("UPDATE users SET balance = balance - ? WHERE wallet_address = ?")
+        .run(stake, creatorWallet.toLowerCase());
+
+      const newBalance = db.prepare("SELECT balance FROM users WHERE wallet_address = ?")
+        .get(creatorWallet.toLowerCase()).balance;
+
       db.prepare(`
-        INSERT INTO positions (goal_id, wallet_address, is_yes, amount)
-        VALUES (?, ?, 1, ?)
-      `).run(result.lastInsertRowid, creatorWallet.toLowerCase(), stake);
+        INSERT INTO balance_history (wallet_address, change_amount, balance_after, reason, goal_id)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(creatorWallet.toLowerCase(), -stake, newBalance, 'goal_created', result.lastInsertRowid);
 
       // Activity feed
       db.prepare(`
@@ -78,8 +99,9 @@ router.get("/circle/:circleId", (req, res) => {
       const noTotal = positions.find((p) => !p.is_yes)?.total || 0;
       const totalPool = yesTotal + noTotal;
       const probability = totalPool > 0 ? Math.round((yesTotal / totalPool) * 100) : 50;
+      const maxPool = goal.max_pool || (goal.stake_amount * 5);
 
-      return { ...goal, yesTotal, noTotal, totalPool, probability };
+      return { ...goal, yesTotal, noTotal, totalPool, maxPool, probability };
     });
 
     res.json(enriched);
@@ -113,14 +135,24 @@ router.get("/:goalId", (req, res) => {
     const noPool = positions.filter((p) => !p.is_yes).reduce((sum, p) => sum + p.amount, 0);
     const totalPool = yesPool + noPool;
     const probability = totalPool > 0 ? Math.round((yesPool / totalPool) * 100) : 50;
+    const maxPool = goal.max_pool || (goal.stake_amount * 5);
+    const remainingCapacity = Math.max(0, maxPool - totalPool);
+
+    // Check if current user has already claimed
+    const claims = db
+      .prepare("SELECT * FROM claims WHERE goal_id = ?")
+      .all(goal.id);
 
     res.json({
       ...goal,
       positions,
       verifications,
+      claims,
       yesPool,
       noPool,
       totalPool,
+      maxPool,
+      remainingCapacity,
       probability,
     });
   } catch (error) {
@@ -150,6 +182,11 @@ router.post("/:goalId/position", (req, res) => {
     if (goal.status !== "active") return res.status(400).json({ error: "Goal is not active" });
     if (new Date(goal.deadline) < new Date()) return res.status(400).json({ error: "Deadline passed" });
 
+    // Creator cannot bet on their own goal
+    if (goal.creator_wallet === walletAddress?.toLowerCase()) {
+      return res.status(400).json({ error: "Creator cannot bet on their own goal" });
+    }
+
     // Check circle membership
     const membership = db
       .prepare("SELECT * FROM circle_members WHERE circle_id = ? AND wallet_address = ?")
@@ -157,6 +194,44 @@ router.post("/:goalId/position", (req, res) => {
 
     if (!membership) {
       return res.status(403).json({ error: "Not a member of the goal's circle" });
+    }
+
+    // ── SINGLE-SIDE BETTING: user can only bet on one side ──
+    const existingPositions = db
+      .prepare("SELECT is_yes, SUM(amount) as total FROM positions WHERE goal_id = ? AND wallet_address = ? GROUP BY is_yes")
+      .all(goalId, walletAddress.toLowerCase());
+
+    const hasYes = existingPositions.some(p => p.is_yes === 1 && p.total > 0);
+    const hasNo = existingPositions.some(p => p.is_yes === 0 && p.total > 0);
+
+    if ((isYes && hasNo) || (!isYes && hasYes)) {
+      const existingSide = hasYes ? "YES" : "NO";
+      return res.status(400).json({
+        error: `You already have a ${existingSide} position. You can only bet on one side per goal.`
+      });
+    }
+
+    // Check user has enough balance
+    const bettor = db
+      .prepare("SELECT * FROM users WHERE wallet_address = ?")
+      .get(walletAddress.toLowerCase());
+
+    if (!bettor) {
+      return res.status(404).json({ error: "User not found. Connect wallet first." });
+    }
+    if ((bettor.balance || 0) < amount) {
+      return res.status(400).json({ error: `Insufficient balance. You have ${bettor.balance} GSTK but need ${amount} GSTK.` });
+    }
+
+    // Enforce max pool cap (proportional to creator stake)
+    const currentTotal = (goal.yes_pool || 0) + (goal.no_pool || 0);
+    const maxPool = goal.max_pool || (goal.stake_amount * 5);
+    if (currentTotal + amount > maxPool) {
+      const remaining = Math.max(0, maxPool - currentTotal);
+      return res.status(400).json({
+        error: `Would exceed max pool size. Remaining capacity: ${remaining} GSTK`,
+        remainingCapacity: remaining
+      });
     }
 
     // Record position
@@ -171,6 +246,18 @@ router.post("/:goalId/position", (req, res) => {
     } else {
       db.prepare("UPDATE goals SET no_pool = no_pool + ? WHERE id = ?").run(amount, goalId);
     }
+
+    // Deduct from user's balance
+    db.prepare("UPDATE users SET balance = balance - ? WHERE wallet_address = ?")
+      .run(amount, walletAddress.toLowerCase());
+
+    const updatedBalance = db.prepare("SELECT balance FROM users WHERE wallet_address = ?")
+      .get(walletAddress.toLowerCase()).balance;
+
+    db.prepare(`
+      INSERT INTO balance_history (wallet_address, change_amount, balance_after, reason, goal_id)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(walletAddress.toLowerCase(), -amount, updatedBalance, isYes ? 'bet_yes' : 'bet_no', goalId);
 
     // Activity feed
     db.prepare(`
@@ -329,6 +416,125 @@ router.post(
     }
   }
 );
+
+// ─────────────── CLAIM PAYOUT ───────────────
+
+const PLATFORM_FEE_BPS = 200; // 2%
+
+router.post("/:goalId/claim", (req, res) => {
+  try {
+    const { walletAddress } = req.body;
+    const goalId = req.params.goalId;
+
+    if (!walletAddress) {
+      return res.status(400).json({ error: "Missing walletAddress" });
+    }
+
+    const db = getDb();
+    const wallet = walletAddress.toLowerCase();
+    const goal = db.prepare("SELECT * FROM goals WHERE id = ?").get(goalId);
+
+    if (!goal) return res.status(404).json({ error: "Goal not found" });
+    if (goal.status !== "achieved" && goal.status !== "failed") {
+      return res.status(400).json({ error: "Goal is not resolved yet" });
+    }
+
+    // Check if already claimed
+    const existingClaim = db
+      .prepare("SELECT * FROM claims WHERE goal_id = ? AND wallet_address = ?")
+      .get(goalId, wallet);
+    if (existingClaim) {
+      return res.status(400).json({ error: "Already claimed" });
+    }
+
+    // Get this user's positions
+    const userPositions = db
+      .prepare("SELECT is_yes, SUM(amount) as total FROM positions WHERE goal_id = ? AND wallet_address = ? GROUP BY is_yes")
+      .all(goalId, wallet);
+
+    const yesAmount = userPositions.find(p => p.is_yes === 1)?.total || 0;
+    const noAmount = userPositions.find(p => p.is_yes === 0)?.total || 0;
+
+    const isCreator = goal.creator_wallet === wallet;
+
+    // Get pool totals
+    const allPositions = db
+      .prepare("SELECT is_yes, SUM(amount) as total FROM positions WHERE goal_id = ? GROUP BY is_yes")
+      .all(goalId);
+    const yesPool = allPositions.find(p => p.is_yes === 1)?.total || 0;
+    const noPool = allPositions.find(p => p.is_yes === 0)?.total || 0;
+
+    let payout = 0;
+
+    if (isCreator) {
+      // ── CREATOR PAYOUT ──
+      if (goal.status === "achieved") {
+        // Creator WINS: gets stake back + all NO pool (minus fee on winnings)
+        const winnings = noPool;
+        const fee = (winnings * PLATFORM_FEE_BPS) / 10000;
+        payout = goal.stake_amount + winnings - fee;
+      }
+      // If failed: creator gets nothing (loses entire stake)
+    } else {
+      // ── FRIEND PAYOUT ──
+      if (yesAmount === 0 && noAmount === 0) {
+        return res.status(400).json({ error: "No position to claim" });
+      }
+
+      if (goal.status === "achieved") {
+        // YES holders: get their tokens back
+        if (yesAmount > 0) {
+          payout = yesAmount;
+        }
+        // NO holders: lose everything
+      } else {
+        // FAILED: NO holders win
+        if (noAmount > 0 && noPool > 0) {
+          // Losers' funds: creator stake + yes pool
+          const loserFunds = goal.stake_amount + yesPool;
+          const fee = (loserFunds * PLATFORM_FEE_BPS) / 10000;
+          const distributable = loserFunds - fee;
+
+          // NO bettor gets: their stake back + proportional share of loser funds
+          const bonus = (noAmount * distributable) / noPool;
+          payout = noAmount + bonus;
+        }
+        // YES holders: lose everything
+      }
+    }
+
+    // Record the claim
+    db.prepare(`
+      INSERT INTO claims (goal_id, wallet_address, payout)
+      VALUES (?, ?, ?)
+    `).run(goalId, wallet, payout);
+
+    // Credit payout to user's balance
+    if (payout > 0) {
+      db.prepare("UPDATE users SET balance = balance + ? WHERE wallet_address = ?")
+        .run(payout, wallet);
+
+      const updatedBalance = db.prepare("SELECT balance FROM users WHERE wallet_address = ?")
+        .get(wallet).balance;
+
+      db.prepare(`
+        INSERT INTO balance_history (wallet_address, change_amount, balance_after, reason, goal_id)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(wallet, payout, updatedBalance, 'payout_claimed', goalId);
+    }
+
+    // Activity feed
+    db.prepare(`
+      INSERT INTO activity_feed (circle_id, goal_id, wallet_address, action, details)
+      VALUES (?, ?, ?, 'payout_claimed', ?)
+    `).run(goal.circle_id, goalId, wallet, `Claimed ${Math.round(payout * 100) / 100} GSTK`);
+
+    res.json({ success: true, payout: Math.round(payout * 100) / 100, status: goal.status });
+  } catch (error) {
+    console.error("Claim error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // ─────────────── GET USER GOALS ───────────────
 

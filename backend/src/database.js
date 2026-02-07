@@ -28,6 +28,17 @@ function initializeDb(database) {
       username TEXT UNIQUE,
       avatar_url TEXT,
       bio TEXT,
+      balance REAL DEFAULT 5000,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS balance_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      wallet_address TEXT NOT NULL,
+      change_amount REAL NOT NULL,
+      balance_after REAL NOT NULL,
+      reason TEXT NOT NULL,
+      goal_id INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -61,6 +72,7 @@ function initializeDb(database) {
       stake_amount REAL DEFAULT 0,
       yes_pool REAL DEFAULT 0,
       no_pool REAL DEFAULT 0,
+      max_pool REAL DEFAULT 0,
       status TEXT DEFAULT 'active',
       proof_url TEXT,
       proof_description TEXT,
@@ -69,6 +81,15 @@ function initializeDb(database) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       resolved_at DATETIME,
       FOREIGN KEY (circle_id) REFERENCES circles(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS claims (
+      goal_id INTEGER NOT NULL,
+      wallet_address TEXT NOT NULL,
+      payout REAL NOT NULL DEFAULT 0,
+      claimed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (goal_id, wallet_address),
+      FOREIGN KEY (goal_id) REFERENCES goals(id)
     );
 
     CREATE TABLE IF NOT EXISTS positions (

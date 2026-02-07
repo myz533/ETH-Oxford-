@@ -26,6 +26,8 @@ export default function GoalCard({ goal, compact = false }) {
   const emoji = categoryEmojis[goal.category] || "🎯";
 
   const totalPool = (goal.yesTotal || goal.yes_pool || 0) + (goal.noTotal || goal.no_pool || 0);
+  const creatorStake = goal.stake_amount || 0;
+  const maxPool = goal.max_pool || (creatorStake * 5);
 
   const deadline = new Date(goal.deadline);
   const now = new Date();
@@ -91,8 +93,11 @@ export default function GoalCard({ goal, compact = false }) {
       {/* Footer Stats */}
       <div className="flex items-center justify-between text-xs text-dark-400">
         <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1">
-            💎 {Math.round(totalPool)} GSTK
+          <span className="flex items-center gap-1" title="Creator stake">
+            🔒 {Math.round(creatorStake)} GSTK
+          </span>
+          <span className="flex items-center gap-1" title="Betting pool">
+            💎 {Math.round(totalPool)}/{Math.round(maxPool)}
           </span>
           {goal.status === "active" && (
             <span className="flex items-center gap-1">
