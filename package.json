@@ -1,0 +1,29 @@
+{
+  "name": "goalstake",
+  "version": "1.0.0",
+  "description": "GoalStake - Social prediction market for personal goals",
+  "private": true,
+  "scripts": {
+    "compile": "npx hardhat compile",
+    "test:contracts": "npx hardhat test",
+    "deploy:local": "npx hardhat run scripts/deploy.js --network localhost",
+    "node": "npx hardhat node",
+    "backend": "cd backend && node src/index.js",
+    "frontend": "cd frontend && npm run dev",
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
+    "build": "cd frontend && npm run build",
+    "start": "cd backend && node src/index.js",
+    "production": "npm run build && npm run start",
+    "share": "npm run build && cd backend && node src/index.js",
+    "tunnel": "npx localtunnel --port 3001"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "concurrently": "^8.2.2",
+    "hardhat": "^2.19.4"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.4.0"
+  }
+}
