@@ -208,6 +208,7 @@ ForShure sits at the convergence of:
 
 ### Revenue Model
 - 10% platform fee on loser pool at market resolution
+- Cash be exchanged with GSTK tokens
 - Premium accounts/circles with advanced analytics and financial products (e.g. token options/derivatives, insurance)
 - NFT achievement badges
 - API licensing for third-party integrations + data (e.g. newest trends in personal goal-setting)
