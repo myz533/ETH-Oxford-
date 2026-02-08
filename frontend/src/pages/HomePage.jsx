@@ -164,7 +164,6 @@ export default function HomePage() {
             <Target size={16} className="text-brand-400" />
             <span>ForShure</span>
           </div>
-          <p>Built for ETH Oxford 2026 🎓</p>
         </div>
       </footer>
     </div>
