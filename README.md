@@ -220,7 +220,3 @@ Two-tier AI filtering system [to be implemented]:
 2. **OpenAI Moderation API** — Advanced contextual analysis for harassment, hate speech, etc.
 
 Every goal title, description, and comment passes through this pipeline before being saved.
-
-## License
-
-MIT
