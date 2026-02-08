@@ -463,8 +463,20 @@ router.post(
 );
 
 // ─────────────── CLAIM PAYOUT ───────────────
-
-const PLATFORM_FEE_BPS = 200; // 2%
+//
+// PAYOUT RULES:
+// ✅ If Goal Succeeds:
+//   Creator:      stake back + 45% of NO pool
+//   YES bettors:  tokens back + 45% of NO pool (split proportionally)
+//   NO bettors:   lose everything
+//   Platform:     10% of NO pool
+//
+// ❌ If Goal Fails:
+//   Creator:      loses stake → goes to platform
+//   YES bettors:  lose everything
+//   NO bettors:   tokens back + 45% of YES pool (split proportionally)
+//   Platform:     creator stake + 55% of YES pool
+//
 
 router.post("/:goalId/claim", (req, res) => {
   try {
@@ -514,12 +526,10 @@ router.post("/:goalId/claim", (req, res) => {
     if (isCreator) {
       // ── CREATOR PAYOUT ──
       if (goal.status === "achieved") {
-        // Creator WINS: gets stake back + all NO pool (minus fee on winnings)
-        const winnings = noPool;
-        const fee = (winnings * PLATFORM_FEE_BPS) / 10000;
-        payout = goal.stake_amount + winnings - fee;
+        // Creator WINS: stake back + 45% of NO pool
+        payout = goal.stake_amount + (noPool * 0.45);
       }
-      // If failed: creator gets nothing (loses entire stake)
+      // If failed: creator gets nothing (loses entire stake → platform)
     } else {
       // ── FRIEND PAYOUT ──
       if (yesAmount === 0 && noAmount === 0) {
@@ -527,22 +537,18 @@ router.post("/:goalId/claim", (req, res) => {
       }
 
       if (goal.status === "achieved") {
-        // YES holders: get their tokens back
+        // YES holders: tokens back + proportional share of 45% of NO pool
         if (yesAmount > 0) {
-          payout = yesAmount;
+          const yesBonus = yesPool > 0 ? (yesAmount * (noPool * 0.45)) / yesPool : 0;
+          payout = yesAmount + yesBonus;
         }
         // NO holders: lose everything
       } else {
         // FAILED: NO holders win
         if (noAmount > 0 && noPool > 0) {
-          // Losers' funds: creator stake + yes pool
-          const loserFunds = goal.stake_amount + yesPool;
-          const fee = (loserFunds * PLATFORM_FEE_BPS) / 10000;
-          const distributable = loserFunds - fee;
-
-          // NO bettor gets: their stake back + proportional share of loser funds
-          const bonus = (noAmount * distributable) / noPool;
-          payout = noAmount + bonus;
+          // NO bettor gets: tokens back + proportional share of 45% of YES pool
+          const noBonus = (noAmount * (yesPool * 0.45)) / noPool;
+          payout = noAmount + noBonus;
         }
         // YES holders: lose everything
       }

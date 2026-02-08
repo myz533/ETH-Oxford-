@@ -1,7 +1,7 @@
 {
-  "name": "goalstake",
+  "name": "forshure",
   "version": "1.0.0",
-  "description": "GoalStake - Social prediction market for personal goals",
+  "description": "ForShure - Social prediction market for personal goals",
   "private": true,
   "scripts": {
     "compile": "npx hardhat compile",

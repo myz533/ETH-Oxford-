@@ -14,7 +14,7 @@ export function WalletProvider({ children }) {
 
   // Check if wallet already connected
   useEffect(() => {
-    const saved = localStorage.getItem("goalstake_wallet");
+    const saved = localStorage.getItem("forshure_wallet");
     if (saved) {
       const addr = saved.toLowerCase();
       setWallet(addr);
@@ -33,21 +33,21 @@ export function WalletProvider({ children }) {
     } catch {
       // User not in DB (e.g. DB was reset) — re-register them
       try {
-        const savedName = localStorage.getItem("goalstake_username");
+        const savedName = localStorage.getItem("forshure_username");
         if (savedName) {
           const profile = await userApi.register(address, savedName);
           setUser(profile);
         } else {
           // No saved name — clear state so they see sign-in
           setWallet(null);
-          localStorage.removeItem("goalstake_wallet");
-          localStorage.removeItem("goalstake_username");
+          localStorage.removeItem("forshure_wallet");
+          localStorage.removeItem("forshure_username");
         }
       } catch (regErr) {
         console.error("Auto re-register failed:", regErr);
         setWallet(null);
-        localStorage.removeItem("goalstake_wallet");
-        localStorage.removeItem("goalstake_username");
+        localStorage.removeItem("forshure_wallet");
+        localStorage.removeItem("forshure_username");
       }
     } finally {
       setLoading(false);
@@ -68,8 +68,8 @@ export function WalletProvider({ children }) {
       const profile = await userApi.register(addr, username, null, avatarData);
       setWallet(addr);
       setUser(profile);
-      localStorage.setItem("goalstake_wallet", addr);
-      localStorage.setItem("goalstake_username", username);
+      localStorage.setItem("forshure_wallet", addr);
+      localStorage.setItem("forshure_username", username);
 
       // Load circles
       try {
@@ -89,8 +89,8 @@ export function WalletProvider({ children }) {
     setWallet(null);
     setUser(null);
     setCircles([]);
-    localStorage.removeItem("goalstake_wallet");
-    localStorage.removeItem("goalstake_username");
+    localStorage.removeItem("forshure_wallet");
+    localStorage.removeItem("forshure_username");
   }, []);
 
   const refreshCircles = useCallback(async () => {
@@ -116,7 +116,7 @@ export function WalletProvider({ children }) {
       const profile = await userApi.updateProfile(wallet, updates);
       setUser((prev) => ({ ...prev, ...profile }));
       if (updates.username) {
-        localStorage.setItem("goalstake_username", updates.username);
+        localStorage.setItem("forshure_username", updates.username);
       }
     } catch (err) {
       throw err;

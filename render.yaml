@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: goalstake-api
+    name: forshure-api
     runtime: node
     buildCommand: cd backend && npm install
     startCommand: cd backend && node src/index.js

@@ -23,7 +23,7 @@ export default function Navbar() {
               <Target size={20} className="text-white" />
             </div>
             <span className="text-xl font-bold">
-              Goal<span className="gradient-text">Stake</span>
+              For<span className="gradient-text">Shure</span>
             </span>
           </Link>
 

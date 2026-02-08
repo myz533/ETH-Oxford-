@@ -35,7 +35,7 @@ export default function LeaderboardPage() {
             <Trophy className="text-yellow-400" size={32} />
             Leaderboard
           </h1>
-          <p className="text-dark-400 mt-1">Top goal achievers on GoalStake</p>
+          <p className="text-dark-400 mt-1">Top goal achievers on ForShure</p>
         </div>
 
         {loading ? (

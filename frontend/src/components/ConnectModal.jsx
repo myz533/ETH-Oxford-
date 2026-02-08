@@ -71,7 +71,7 @@ export default function ConnectModal({ onConnect, onClose }) {
               <User size={20} className="text-white" />
             </div>
             <div>
-              <h2 className="text-xl font-bold">Join GoalStake</h2>
+              <h2 className="text-xl font-bold">Join ForShure</h2>
               <p className="text-sm text-dark-400">Set up your profile to get started</p>
             </div>
           </div>

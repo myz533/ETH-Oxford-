@@ -132,7 +132,7 @@ export default function GoalDetailPage() {
   const userYes = goal.positions?.filter(p => p.wallet_address === wallet?.toLowerCase() && p.is_yes).reduce((s, p) => s + p.amount, 0) || 0;
   const userNo = goal.positions?.filter(p => p.wallet_address === wallet?.toLowerCase() && !p.is_yes).reduce((s, p) => s + p.amount, 0) || 0;
 
-  // Calculate potential payout
+  // Calculate potential payout (45% / 45% / 10% split)
   const calcPayout = () => {
     if (!isResolved) return null;
     const yesPool = goal.yesPool || 0;
@@ -141,20 +141,24 @@ export default function GoalDetailPage() {
 
     if (isCreator) {
       if (goal.status === "achieved") {
-        const fee = (noPool * 0.02);
-        return stake + noPool - fee;
+        // Creator: stake back + 45% of NO pool
+        return stake + (noPool * 0.45);
       }
-      return 0;
+      return 0; // loses stake
     }
 
     if (goal.status === "achieved") {
-      return userYes; // YES holders get tokens back
+      // YES holders: tokens back + proportional share of 45% of NO pool
+      if (userYes > 0 && yesPool > 0) {
+        const yesBonus = (userYes * (noPool * 0.45)) / yesPool;
+        return userYes + yesBonus;
+      }
+      return 0;
     } else {
+      // NO holders: tokens back + proportional share of 45% of YES pool
       if (userNo > 0 && noPool > 0) {
-        const loserFunds = stake + yesPool;
-        const fee = loserFunds * 0.02;
-        const bonus = (userNo * (loserFunds - fee)) / noPool;
-        return userNo + bonus;
+        const noBonus = (userNo * (yesPool * 0.45)) / noPool;
+        return userNo + noBonus;
       }
       return 0;
     }
@@ -288,17 +292,19 @@ export default function GoalDetailPage() {
             <div className="p-3 bg-green-900/10 rounded-xl border border-green-800/20">
               <p className="font-bold text-green-400 mb-2">✅ If Goal Succeeds</p>
               <ul className="space-y-1 text-dark-300">
-                <li>• <span className="text-yellow-400">Creator</span>: stake back + all NO pool</li>
-                <li>• <span className="text-brand-400">YES bettors</span>: get tokens back</li>
+                <li>• <span className="text-yellow-400">Creator</span>: stake back + 45% of NO pool</li>
+                <li>• <span className="text-brand-400">YES bettors</span>: tokens back + 45% of NO pool</li>
                 <li>• <span className="text-red-400">NO bettors</span>: lose everything</li>
+                <li>• <span className="text-dark-500">Platform</span>: 10% of NO pool</li>
               </ul>
             </div>
             <div className="p-3 bg-red-900/10 rounded-xl border border-red-800/20">
               <p className="font-bold text-red-400 mb-2">❌ If Goal Fails</p>
               <ul className="space-y-1 text-dark-300">
-                <li>• <span className="text-yellow-400">Creator</span>: loses entire stake</li>
+                <li>• <span className="text-yellow-400">Creator</span>: loses stake → platform</li>
                 <li>• <span className="text-brand-400">YES bettors</span>: lose everything</li>
-                <li>• <span className="text-red-400">NO bettors</span>: tokens back + bonus</li>
+                <li>• <span className="text-red-400">NO bettors</span>: tokens back + 45% of YES pool</li>
+                <li>• <span className="text-dark-500">Platform</span>: stake + 55% of YES pool</li>
               </ul>
             </div>
           </div>

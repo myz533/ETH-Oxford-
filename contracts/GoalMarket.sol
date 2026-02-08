@@ -10,23 +10,23 @@ import "./FriendCircle.sol";
  * @title GoalMarket
  * @notice The core prediction market for personal goals.
  *
- *  MECHANISM (No-Arbitrage Design):
+ *  MECHANISM:
  *  1. Creator stakes tokens as commitment (separate from YES/NO pools)
  *  2. Friends buy YES (believe) or NO (doubt) positions
  *  3. Max total betting pool is capped at POT_MULTIPLIER x creator's stake
  *  4. When deadline passes, creator submits proof; circle verifies
  *
  *  PAYOUTS ON SUCCESS (goal achieved):
- *    - Creator:   gets stake back + entire NO pool (minus fee)
- *    - YES bets:  get their tokens back (they supported - no loss)
- *    - NO bets:   lose everything (funds go to creator)
+ *    - Creator:      stake back + 45% of NO pool
+ *    - YES bettors:  tokens back + 45% of NO pool (proportional)
+ *    - NO bettors:   lose everything
+ *    - Platform:     10% of NO pool
  *
  *  PAYOUTS ON FAILURE (goal not achieved):
- *    - Creator:   loses entire stake (distributed to NO bettors)
- *    - YES bets:  lose everything (funds go to NO bettors)
- *    - NO bets:   get tokens back + proportional share of (creator stake + YES pool) minus fee
- *
- *  ZERO-SUM: total payouts + fees = total deposits. No arbitrage possible.
+ *    - Creator:      loses entire stake → goes to platform
+ *    - YES bettors:  lose everything
+ *    - NO bettors:   tokens back + 45% of YES pool (proportional)
+ *    - Platform:     creator stake + 55% of YES pool
  */
 contract GoalMarket is Ownable, ReentrancyGuard {
     GoalToken public token;
@@ -61,7 +61,8 @@ contract GoalMarket is Ownable, ReentrancyGuard {
 
     uint256 public nextGoalId = 1;
     uint256 public constant MIN_STAKE = 10 * 10 ** 18;       // 10 GSTK minimum stake
-    uint256 public constant PLATFORM_FEE_BPS = 200;          // 2% platform fee
+    uint256 public constant PLATFORM_FEE_BPS = 1000;         // 10% platform fee (of loser pool)
+    uint256 public constant WINNER_SHARE_BPS = 4500;         // 45% to each winner group
     uint256 public constant VERIFICATION_QUORUM_BPS = 5000;  // 50% of circle must verify
     uint256 public constant POT_MULTIPLIER = 5;              // Max pool = 5x creator stake
 
@@ -283,16 +284,16 @@ contract GoalMarket is Ownable, ReentrancyGuard {
     // ─────────────────────── CLAIMS & PAYOUTS ───────────────────────
     //
     //  ACHIEVED (success):
-    //    Creator  -> creatorStake + noPool - fee(noPool)
-    //    YES bets -> get yesAmount back (supported the creator)
-    //    NO bets  -> lose everything (funds go to creator)
+    //    Creator      -> creatorStake + 45% of noPool
+    //    YES bettors  -> yesAmount back + proportional 45% of noPool
+    //    NO bettors   -> lose everything
+    //    Platform     -> 10% of noPool
     //
     //  FAILED:
-    //    Creator  -> loses creatorStake
-    //    YES bets -> lose everything
-    //    NO bets  -> noAmount back + proportional share of (creatorStake + yesPool) - fee
-    //
-    //  Zero-sum: totalPayout + fees = creatorStake + yesPool + noPool
+    //    Creator      -> loses creatorStake → platform
+    //    YES bettors  -> lose everything
+    //    NO bettors   -> noAmount back + proportional 45% of yesPool
+    //    Platform     -> creatorStake + 55% of yesPool
     //
 
     /// @notice Creator claims payout after goal is resolved
@@ -312,12 +313,11 @@ contract GoalMarket is Ownable, ReentrancyGuard {
         uint256 payout = 0;
 
         if (goal.status == GoalStatus.Achieved) {
-            // Creator WINS: gets stake back + all NO pool (minus fee on winnings)
-            uint256 winnings = goal.noPool;
-            uint256 fee = (winnings * PLATFORM_FEE_BPS) / 10000;
-            payout = goal.creatorStake + winnings - fee;
+            // Creator WINS: stake back + 45% of NO pool
+            uint256 creatorBonus = (goal.noPool * WINNER_SHARE_BPS) / 10000;
+            payout = goal.creatorStake + creatorBonus;
         }
-        // If Failed: creator gets nothing (loses entire stake)
+        // If Failed: creator gets nothing (loses entire stake → platform)
 
         if (payout > 0) {
             require(token.transfer(msg.sender, payout), "GoalMarket: payout failed");
@@ -345,24 +345,20 @@ contract GoalMarket is Ownable, ReentrancyGuard {
 
         if (goal.status == GoalStatus.Achieved) {
             // ── YES holders win ──
-            // They get their tokens back (supported the creator)
-            if (pos.yesAmount > 0) {
-                payout = pos.yesAmount;
+            // Tokens back + proportional share of 45% of NO pool
+            if (pos.yesAmount > 0 && goal.yesPool > 0) {
+                uint256 yesBonus = (pos.yesAmount * (goal.noPool * WINNER_SHARE_BPS) / 10000) / goal.yesPool;
+                payout = pos.yesAmount + yesBonus;
             }
-            // NO holders: lose everything (no payout)
+            // NO holders: lose everything
         } else {
             // ── FAILED: NO holders win ──
+            // Tokens back + proportional share of 45% of YES pool
             if (pos.noAmount > 0 && goal.noPool > 0) {
-                // Losers' funds to distribute: creatorStake + entire yesPool
-                uint256 loserFunds = goal.creatorStake + goal.yesPool;
-                uint256 fee = (loserFunds * PLATFORM_FEE_BPS) / 10000;
-                uint256 distributable = loserFunds - fee;
-
-                // Each NO bettor gets: their stake back + proportional share of loser funds
-                uint256 bonus = (pos.noAmount * distributable) / goal.noPool;
-                payout = pos.noAmount + bonus;
+                uint256 noBonus = (pos.noAmount * (goal.yesPool * WINNER_SHARE_BPS) / 10000) / goal.noPool;
+                payout = pos.noAmount + noBonus;
             }
-            // YES holders: lose everything (no payout)
+            // YES holders: lose everything
         }
 
         if (payout > 0) {

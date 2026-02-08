@@ -45,7 +45,7 @@ export default function HomePage() {
             ) : (
               <button onClick={connectWallet} className="btn-primary text-lg px-10 py-4 flex items-center gap-2">
                 <Target size={22} />
-                Get Started — Connect Wallet
+                Get Started
                 <ArrowRight size={18} />
               </button>
             )}
@@ -58,7 +58,7 @@ export default function HomePage() {
         <div className="max-w-6xl mx-auto">
           <h2 className="text-3xl font-bold text-center mb-4">How It Works</h2>
           <p className="text-dark-400 text-center mb-12 max-w-xl mx-auto">
-            GoalStake combines prediction markets with social accountability to
+            ForShure combines prediction markets with social accountability to
             create a new consumer primitive for personal growth.
           </p>
 
@@ -108,7 +108,7 @@ export default function HomePage() {
       {/* Why It's Different */}
       <section className="py-20 px-4 bg-dark-900/30">
         <div className="max-w-6xl mx-auto">
-          <h2 className="text-3xl font-bold text-center mb-4">Why GoalStake?</h2>
+          <h2 className="text-3xl font-bold text-center mb-4">Why ForShure?</h2>
           <p className="text-dark-400 text-center mb-12 max-w-xl mx-auto">
             At the intersection of prediction markets, social networks, and token economies.
           </p>
@@ -151,7 +151,7 @@ export default function HomePage() {
           </p>
           {!wallet && (
             <button onClick={connectWallet} className="btn-primary text-lg px-10 py-4">
-              Connect Wallet & Start
+              Get Started
             </button>
           )}
         </div>
@@ -162,7 +162,7 @@ export default function HomePage() {
         <div className="max-w-6xl mx-auto flex items-center justify-between text-sm text-dark-500">
           <div className="flex items-center gap-2">
             <Target size={16} className="text-brand-400" />
-            <span>GoalStake</span>
+            <span>ForShure</span>
           </div>
           <p>Built for ETH Oxford 2026 🎓</p>
         </div>
